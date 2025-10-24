@@ -7,20 +7,30 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.drivehubapp.databinding.ActivityLoginBinding
+// Importações necessárias
+import com.example.drivehubapp.network.ApiClient
+import com.example.drivehubapp.network.ApiService
 import com.example.drivehubapp.network.LoginRequest
-import com.example.drivehubapp.network.User
+import com.example.drivehubapp.network.SessionManager
+import com.example.drivehubapp.network.User // Assumindo que esta é sua classe de usuário
+import com.example.drivehubapp.network.LoginResponse // Assumindo que esta é sua classe de resposta
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class LoginActivity : AppCompatActivity() {
     private lateinit var binding: ActivityLoginBinding
-    private val PREFS_NAME = "drivehub_prefs"
+    private lateinit var sessionManager: SessionManager // <-- CORREÇÃO: Declarar a variável
+
+    // private val PREFS_NAME = "drivehub_prefs" // <-- Removido, SessionManager agora cuida disso
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Inicializa o SessionManager (Como planejado no Passo 1)
+        sessionManager = SessionManager(this)
 
         binding.buttonLogin.setOnClickListener {
             val cpf = binding.editTextCpf.text.toString().trim()
@@ -37,28 +47,36 @@ class LoginActivity : AppCompatActivity() {
         setLoading(true)
         lifecycleScope.launch {
             try {
+                // <-- CORREÇÃO: Obter o serviço a partir do ApiClient com Contexto
+                // Isso é vital para o Interceptor funcionar nas próximas telas
+                val apiService = ApiClient.getClient(this@LoginActivity).create(ApiService::class.java)
+
+                // Seu LoginRequest parece estar correto
+                val request = LoginRequest(cpf = cpf, senha = senha)
+
                 val response = withContext(Dispatchers.IO) {
-                    ApiClient.service.login(LoginRequest(cpf = cpf, senha = senha)) // <-- CORREÇÃO
+                    apiService.login(request)
                 }
 
-
                 if (response.isSuccessful) {
-                    val body = response.body()
+                    val body = response.body() // Tipo esperado: LoginResponse
 
+                    // Assumindo que seu LoginResponse tem 'status' e 'user'
                     if (body != null &&
                         (body.status.equals("ok", ignoreCase = true) || body.status.equals("success", ignoreCase = true)) &&
-                        body.user != null
+                        body.user != null // 'user' é o objeto com os dados
                     ) {
-                        // CORREÇÃO: 'body.user' já é o objeto UserData.
-                        // Não é necessário copiá-lo campo por campo.
-                        // O erro 'No parameter with name 'baseId' found' era aqui,
-                        // pois a classe UserData espera 'base_id' (vindo do JSON) e não 'baseId'.
-                        saveUserData(body.user)
 
-                        startActivity(Intent(this@LoginActivity, DashboardActivity::class.java))
-                        finish()
+                        // <-- CORREÇÃO: Usar o SessionManager para salvar o ID
+                        sessionManager.saveUserId(body.user.id)
+
+                        // <-- CORREÇÃO: Navegar para a tela de Seleção de Veículo
+                        // (DashboardActivity será acessada DEPOIS de selecionar o veículo)
+                        startActivity(Intent(this@LoginActivity, VehicleSelectionActivity::class.java))
+                        finish() // Impede de voltar ao Login
+
                     } else {
-                        val msg = body?.message ?: "Erro no login"
+                        val msg = body?.message ?: "Usuário ou senha inválidos"
                         Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
                     }
 
@@ -77,23 +95,24 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-
-
-
     private fun setLoading(isLoading: Boolean) {
         binding.buttonLogin.isEnabled = !isLoading
-        // habilite/disable outros campos conforme sua UI
+        binding.editTextCpf.isEnabled = !isLoading
+        binding.editTextPassword.isEnabled = !isLoading
     }
 
+    // <-- CORREÇÃO: Esta função não é mais necessária
+    // O SessionManager.saveUserId() já faz o trabalho principal.
+    /*
     private fun saveUserData(user: User) {
         val sharedPref = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         with(sharedPref.edit()) {
             putInt("USER_ID", user.id)
             putString("USER_NAME", user.nome)
-            // CORREÇÃO: Use 'baseId' (camelCase)
             putInt("USER_BASE_ID", user.baseId ?: -1)
             putBoolean("IS_LOGGED_IN", true)
             apply()
         }
     }
+    */
 }
